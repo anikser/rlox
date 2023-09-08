@@ -5,13 +5,14 @@ pub struct Scanner {
     line: u32,
 }
 
+#[derive(Copy, Clone)]
 pub struct Token<'a> {
-    token_type: TokenType,
-    source: &'a str,
-    line: u32,
+    pub token_type: TokenType,
+    pub source: &'a str,
+    pub line: u32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TokenType {
     // Single character token
     LeftParen,
@@ -59,6 +60,30 @@ pub enum TokenType {
     EOF,
 }
 
+impl From<&str> for TokenType {
+    fn from(value: &str) -> Self {
+        match value {
+            "and" => TokenType::And,
+            "class" => TokenType::Class,
+            "else" => TokenType::Else,
+            "false" => TokenType::False,
+            "for" => TokenType::For,
+            "fun" => TokenType::Fun,
+            "if" => TokenType::If,
+            "nil" => TokenType::Nil,
+            "or" => TokenType::Or,
+            "print" => TokenType::Print,
+            "return" => TokenType::Return,
+            "super" => TokenType::Super,
+            "this" => TokenType::This,
+            "true" => TokenType::True,
+            "var" => TokenType::Var,
+            "while" => TokenType::While,
+            _ => TokenType::Identifier,
+        }
+    }
+}
+
 impl Scanner {
     pub fn init(source: String) -> Self {
         Self {
@@ -69,12 +94,12 @@ impl Scanner {
         }
     }
 
-    fn scan(&mut self) {
+    pub fn scan(&mut self) {
         let mut line = u32::MAX;
         loop {
             let token = self.scan_token();
             if token.line != line {
-                print!("{:03x}", token.line);
+                print!("{:03x} ", token.line);
                 line = token.line;
             } else {
                 print!("   | ");
@@ -86,9 +111,10 @@ impl Scanner {
         }
     }
 
-    fn scan_token(&mut self) -> Token {
+    pub fn scan_token(&mut self) -> Token {
+        self.skip_whitespace();
         self.start = self.current;
-        match self.current == self.source.len() - 1 {
+        match self.current == self.source.len() {
             true => self.make_token(TokenType::EOF),
             false => match self.advance() as char {
                 '(' => self.make_token(TokenType::LeftParen),
@@ -251,10 +277,7 @@ impl Scanner {
             self.advance();
         }
 
-        self.make_token(self.identifier_type())
-    }
-
-    fn identifier_type(&self) -> TokenType {
-        TokenType::Identifier
+        let text = std::str::from_utf8(&self.source.as_bytes()[self.start..self.current]).unwrap();
+        self.make_token(TokenType::from(text))
     }
 }

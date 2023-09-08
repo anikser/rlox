@@ -1,10 +1,13 @@
 use std::{
+    cell::RefCell,
     fs,
     io::{self, BufRead, Write},
 };
 
 use crate::common::chunk::{Chunk, OpCode};
 use crate::common::value::Value;
+
+use crate::compiler::*;
 
 #[cfg(debug_assertions)]
 use crate::common::chunk::FmtWriter;
@@ -14,8 +17,8 @@ pub enum InterpretError {
     CompileError,
     RuntimeError,
 }
-pub struct VM<'a> {
-    chunk: Option<&'a Chunk>,
+pub struct VM {
+    chunk: RefCell<Chunk>,
     // TODO: can we make this better?
     ip: *const u8,
     stack: [Value; STACK_MAX],
@@ -26,10 +29,10 @@ const STACK_MAX: usize = 256;
 
 type BinaryOp = fn(Value, Value) -> Value;
 
-impl<'a> VM<'a> {
+impl VM {
     pub fn init() -> Self {
         let vm = VM {
-            chunk: None,
+            chunk: RefCell::new(Chunk::new()),
             ip: std::ptr::null_mut(),
             stack: [Value(0.0); STACK_MAX],
             // stack_top: std::ptr::null_mut(),
@@ -52,6 +55,7 @@ impl<'a> VM<'a> {
                     break;
                 }
                 Ok(line) => {
+                    // TODO: exception handling here
                     self.interpret(line);
                 }
                 Err(err) => {
@@ -81,8 +85,9 @@ impl<'a> VM<'a> {
     }
 
     pub fn interpret(&mut self, program: String) -> Result<(), InterpretError> {
-        let chunk = crate::compiler::compile(program);
-        Ok(())
+        compile(program, self.chunk.get_mut())?;
+        self.ip = &self.chunk.get_mut().code[0];
+        self.run()
     }
 
     // pub fn interpret(&mut self, chunk: &'a Chunk) -> Result<(), InterpretError> {
@@ -92,54 +97,53 @@ impl<'a> VM<'a> {
     // }
 
     fn run(&mut self) -> Result<(), InterpretError> {
-        match self.chunk {
-            None => Err(InterpretError::CompileError),
-            Some(chunk) => loop {
-                // FIXME: do not unwrap...
-                #[cfg(debug_assertions)]
-                {
-                    self.print_stack();
+        loop {
+            // FIXME: do not unwrap...
+            #[cfg(debug_assertions)]
+            {
+                self.print_stack();
 
-                    chunk
-                        .disassemble(
-                            &mut FmtWriter(std::io::stdout()),
-                            (self.ip as usize) - (&chunk.code[0] as *const u8 as usize),
-                        )
-                        .unwrap();
-                }
+                let start_ptr = &self.chunk.get_mut().code[0] as *const u8;
+                self.chunk
+                    .get_mut()
+                    .disassemble(
+                        &mut FmtWriter(std::io::stdout()),
+                        (self.ip as usize) - (start_ptr as usize),
+                    )
+                    .unwrap();
+            }
 
-                let opcode = OpCode::from(self.read_byte());
-                match opcode {
-                    OpCode::Return => {
-                        println!("{}", self.pop());
-                        return Ok(());
-                    }
-                    OpCode::Constant => {
-                        let constant = self.read_constant(&chunk);
-                        self.push(constant);
-                    }
-                    OpCode::ConstantLong => {
-                        let constant = self.read_constant_long(&chunk);
-                        self.push(constant);
-                    }
-                    OpCode::Negate => {
-                        let negated = -self.pop();
-                        self.push(negated);
-                    }
-                    OpCode::Add => {
-                        self.binary_op(|a, b| a + b);
-                    }
-                    OpCode::Subtract => {
-                        self.binary_op(|a, b| a - b);
-                    }
-                    OpCode::Multiply => {
-                        self.binary_op(|a, b| a * b);
-                    }
-                    OpCode::Divide => {
-                        self.binary_op(|a, b| a / b);
-                    }
+            let opcode = OpCode::from(self.read_byte());
+            match opcode {
+                OpCode::Return => {
+                    println!("{}", self.pop());
+                    return Ok(());
                 }
-            },
+                OpCode::Constant => {
+                    let constant = self.read_constant();
+                    self.push(constant);
+                }
+                OpCode::ConstantLong => {
+                    let constant = self.read_constant_long();
+                    self.push(constant);
+                }
+                OpCode::Negate => {
+                    let negated = -self.pop();
+                    self.push(negated);
+                }
+                OpCode::Add => {
+                    self.binary_op(|a, b| a + b);
+                }
+                OpCode::Subtract => {
+                    self.binary_op(|a, b| a - b);
+                }
+                OpCode::Multiply => {
+                    self.binary_op(|a, b| a * b);
+                }
+                OpCode::Divide => {
+                    self.binary_op(|a, b| a / b);
+                }
+            }
         }
     }
 
@@ -151,18 +155,18 @@ impl<'a> VM<'a> {
     }
 
     #[inline(always)]
-    fn read_constant(&mut self, chunk: &Chunk) -> Value {
+    fn read_constant(&mut self) -> Value {
         let idx = self.read_byte();
-        return chunk.constants[idx as usize];
+        return self.chunk.borrow().constants[idx as usize];
     }
 
     #[inline(always)]
-    fn read_constant_long(&mut self, chunk: &Chunk) -> Value {
+    fn read_constant_long(&mut self) -> Value {
         let mut bytes: [u8; 4] = [0; 4];
         unsafe { std::ptr::copy_nonoverlapping(self.ip, &mut bytes as *mut u8, 3) };
         self.ip = unsafe { self.ip.add(3) };
         let idx = u32::from_le_bytes(bytes);
-        return chunk.constants[idx as usize];
+        return self.chunk.borrow().constants[idx as usize];
     }
 
     #[inline(always)]

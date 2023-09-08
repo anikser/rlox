@@ -1,5 +1,7 @@
 use std::{fmt, vec};
 
+use super::value::Value;
+
 pub struct FmtWriter<W: std::io::Write>(pub W);
 
 impl<W: std::io::Write> std::fmt::Write for FmtWriter<W> {
@@ -19,6 +21,10 @@ pub enum OpCode {
     Constant = 1,
     ConstantLong = 2,
     Negate = 3,
+    Add = 4,
+    Subtract = 5,
+    Multiply = 6,
+    Divide = 7,
 }
 impl From<u8> for OpCode {
     fn from(value: u8) -> Self {
@@ -27,25 +33,12 @@ impl From<u8> for OpCode {
             1 => OpCode::Constant,
             2 => OpCode::ConstantLong,
             3 => OpCode::Negate,
+            4 => OpCode::Add,
+            5 => OpCode::Subtract,
+            6 => OpCode::Multiply,
+            7 => OpCode::Divide,
             unrecognized => panic!("Unrecognized opcode {}", unrecognized),
         }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Value(pub f64);
-
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)?;
-        Ok(())
-    }
-}
-
-impl std::ops::Neg for Value {
-    type Output = Self;
-    fn neg(self) -> Self::Output {
-        Value(-self.0)
     }
 }
 

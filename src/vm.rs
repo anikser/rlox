@@ -1,9 +1,15 @@
-use crate::common::chunk::{Chunk, OpCode, Value};
+use std::{
+    fs,
+    io::{self, BufRead, Write},
+};
+
+use crate::common::chunk::{Chunk, OpCode};
+use crate::common::value::Value;
 
 #[cfg(debug_assertions)]
 use crate::common::chunk::FmtWriter;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum InterpretError {
     CompileError,
     RuntimeError,
@@ -18,6 +24,8 @@ pub struct VM<'a> {
 }
 const STACK_MAX: usize = 256;
 
+type BinaryOp = fn(Value, Value) -> Value;
+
 impl<'a> VM<'a> {
     pub fn init() -> Self {
         let vm = VM {
@@ -29,12 +37,59 @@ impl<'a> VM<'a> {
         };
         vm
     }
-
-    pub fn interpret(&mut self, chunk: &'a Chunk) -> Result<(), InterpretError> {
-        self.chunk = Some(chunk);
-        self.ip = &chunk.code[0];
-        self.run()
+    pub fn repl(&mut self) {
+        let stdin = io::stdin();
+        let mut iterator = stdin.lock().lines();
+        loop {
+            // let mut buffer = String::new();
+            print!(">");
+            io::stdout().flush().unwrap();
+            // let result = { stdin.read_line(&mut buffer) };
+            match iterator.next().unwrap() {
+                // Ok(bytes_read) if bytes_read == 0 => {
+                Ok(line) if line.len() == 0 => {
+                    println!();
+                    break;
+                }
+                Ok(line) => {
+                    self.interpret(line);
+                }
+                Err(err) => {
+                    println!("{}", err);
+                    break;
+                }
+            }
+        }
     }
+
+    pub fn run_file(&mut self, path: &String) {
+        let contents = fs::read_to_string(path);
+        match contents {
+            Ok(contents) => {
+                match self.interpret(contents) {
+                    Ok(()) => (),
+                    Err(InterpretError::CompileError) => std::process::exit(65),
+                    Err(InterpretError::RuntimeError) => std::process::exit(70),
+                };
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => println!("File not found."),
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                println!("Permission denied reading file.")
+            }
+            Err(_) => println!("Unexpected error reading file."),
+        }
+    }
+
+    pub fn interpret(&mut self, program: String) -> Result<(), InterpretError> {
+        let chunk = crate::compiler::compile(program);
+        Ok(())
+    }
+
+    // pub fn interpret(&mut self, chunk: &'a Chunk) -> Result<(), InterpretError> {
+    //     self.chunk = Some(chunk);
+    //     self.ip = &chunk.code[0];
+    //     self.run()
+    // }
 
     fn run(&mut self) -> Result<(), InterpretError> {
         match self.chunk {
@@ -71,6 +126,18 @@ impl<'a> VM<'a> {
                         let negated = -self.pop();
                         self.push(negated);
                     }
+                    OpCode::Add => {
+                        self.binary_op(|a, b| a + b);
+                    }
+                    OpCode::Subtract => {
+                        self.binary_op(|a, b| a - b);
+                    }
+                    OpCode::Multiply => {
+                        self.binary_op(|a, b| a * b);
+                    }
+                    OpCode::Divide => {
+                        self.binary_op(|a, b| a / b);
+                    }
                 }
             },
         }
@@ -105,6 +172,7 @@ impl<'a> VM<'a> {
     }
 
     pub fn push(&mut self, value: Value) {
+        // TODO: Stack bounds checking/resizing
         self.stack[self.stack_idx] = value;
         self.stack_idx += 1;
         // println!("{:?}", self.stack_top);
@@ -119,6 +187,12 @@ impl<'a> VM<'a> {
         // ret
         self.stack_idx -= 1;
         self.stack[self.stack_idx]
+    }
+
+    fn binary_op(&mut self, f: BinaryOp) {
+        let a = self.pop();
+        let b = self.pop();
+        self.push(f(a, b));
     }
 
     #[cfg(debug_assertions)]

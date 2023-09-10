@@ -4,7 +4,6 @@ pub mod vm;
 
 use std::env;
 
-use common::{chunk::*, value::Value};
 use vm::{InterpretError, VM};
 
 fn main() -> Result<(), InterpretError> {

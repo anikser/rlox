@@ -4,13 +4,13 @@ use std::{
     io::{self, BufRead, Write},
 };
 
-use crate::common::chunk::{Chunk, OpCode};
-use crate::common::value::Value;
+use crate::common::Value;
+use crate::common::{Chunk, OpCode};
 
 use crate::compiler::*;
 
 #[cfg(debug_assertions)]
-use crate::common::chunk::FmtWriter;
+use crate::common::FmtWriter;
 
 #[derive(Debug, PartialEq)]
 pub enum InterpretError {
@@ -85,7 +85,7 @@ impl VM {
     }
 
     pub fn interpret(&mut self, program: String) -> Result<(), InterpretError> {
-        compile(program, self.chunk.get_mut())?;
+        compile(program, &self.chunk)?;
         self.ip = &self.chunk.get_mut().code[0];
         self.run()
     }

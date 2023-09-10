@@ -43,7 +43,7 @@ impl From<u8> for OpCode {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct ConstantIdx(u32);
+pub struct ConstantIdx(pub u32);
 
 pub struct Chunk {
     pub code: Vec<u8>,
@@ -80,6 +80,7 @@ impl Chunk {
         self.lines.push(line);
     }
 
+    // TODO: refactor to combine with add_code_contant_long?
     pub fn add_code_constant(&mut self, constant: ConstantIdx, line: u32) {
         assert!(
             constant.0 <= 255,
@@ -95,7 +96,7 @@ impl Chunk {
     pub fn add_code_constant_long(&mut self, constant: ConstantIdx, line: u32) {
         let bytes = constant.0.to_le_bytes();
         assert!(
-            constant.0 <= 255,
+            constant.0 <= 16777216,
             "Double operand (long) constant index must be < 16777216."
         );
         self.code.extend(&bytes[0..3]);

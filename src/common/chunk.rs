@@ -100,6 +100,7 @@ impl Chunk {
             "Double operand (long) constant index must be < 16777216."
         );
         self.code.extend(&bytes[0..3]);
+
         for _ in 0..5 {
             self.lines.push(line);
         }

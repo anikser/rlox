@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     fs,
     io::{self, BufRead, Write},
+    rc::Rc,
 };
 
 use crate::common::Value;
@@ -18,7 +19,7 @@ pub enum InterpretError {
     RuntimeError,
 }
 pub struct VM {
-    chunk: RefCell<Chunk>,
+    chunk: Rc<RefCell<Chunk>>,
     // TODO: can we make this better?
     ip: *const u8,
     stack: [Value; STACK_MAX],
@@ -32,7 +33,7 @@ type BinaryOp = fn(Value, Value) -> Value;
 impl VM {
     pub fn init() -> Self {
         let vm = VM {
-            chunk: RefCell::new(Chunk::new()),
+            chunk: Rc::new(RefCell::new(Chunk::new())),
             ip: std::ptr::null_mut(),
             stack: [Value(0.0); STACK_MAX],
             // stack_top: std::ptr::null_mut(),
@@ -85,8 +86,8 @@ impl VM {
     }
 
     pub fn interpret(&mut self, program: String) -> Result<(), InterpretError> {
-        compile(program, &self.chunk)?;
-        self.ip = &self.chunk.get_mut().code[0];
+        compile(program, self.chunk.clone())?;
+        self.ip = &self.chunk.borrow_mut().code[0];
         self.run()
     }
 
@@ -103,9 +104,9 @@ impl VM {
             {
                 self.print_stack();
 
-                let start_ptr = &self.chunk.get_mut().code[0] as *const u8;
-                self.chunk
-                    .get_mut()
+                let chunk = self.chunk.borrow_mut();
+                let start_ptr = &chunk.code[0] as *const u8;
+                chunk
                     .disassemble(
                         &mut FmtWriter(std::io::stdout()),
                         (self.ip as usize) - (start_ptr as usize),
@@ -175,6 +176,7 @@ impl VM {
         self.stack_idx = 0;
     }
 
+    #[inline(always)]
     pub fn push(&mut self, value: Value) {
         // TODO: Stack bounds checking/resizing
         self.stack[self.stack_idx] = value;
@@ -185,6 +187,7 @@ impl VM {
         // println!("{:?}", self.stack_top);
     }
 
+    #[inline(always)]
     pub fn pop(&mut self) -> Value {
         // self.stack_top = unsafe { self.stack_top.sub(1) };
         // let ret = unsafe { *self.stack_top };
@@ -193,10 +196,11 @@ impl VM {
         self.stack[self.stack_idx]
     }
 
+    #[inline(always)]
     fn binary_op(&mut self, f: BinaryOp) {
         let a = self.pop();
         let b = self.pop();
-        self.push(f(a, b));
+        self.push(f(b, a));
     }
 
     #[cfg(debug_assertions)]

@@ -4,20 +4,22 @@ use crate::{
     compiler::scanner::Scanner,
     vm::InterpretError,
 };
-use std::str::FromStr;
 use std::{cell::RefCell, io::Write};
+use std::{rc::Rc, str::FromStr};
 
 use super::{Token, TokenType};
 
-struct Parser<'a> {
-    scanner: &'a mut Scanner,
+struct Parser {
     // FIXME: can we avoid doing this?
-    chunk: &'a RefCell<Chunk>,
-    current: Token<'a>,
-    previous: Token<'a>,
+    scanner: Rc<RefCell<Scanner>>,
+    chunk: Rc<RefCell<Chunk>>,
+    current: Token,
+    previous: Token,
     had_error: bool,
     panic_mode: bool,
 }
+
+#[derive(PartialEq, PartialOrd)]
 enum Precedence {
     None,
     Assignment,
@@ -50,28 +52,27 @@ impl Precedence {
     }
 }
 
-#[repr(C)]
 struct ParseRule {
-    pub prefix: Option<for<'a> fn(&'a mut Parser<'a>)>,
-    pub infix: Option<for<'a> fn(&'a mut Parser<'_>)>,
+    pub prefix: Option<fn(&mut Parser)>,
+    pub infix: Option<fn(&mut Parser)>,
     pub precedence: Precedence,
 }
 
-impl ParseRule {}
+// impl<'a, '> ParseRule<'parser> {}
 
-impl<'a> Parser<'a> {
-    pub fn init(scanner: &'a mut Scanner, chunk: &'a RefCell<Chunk>) -> Self {
+impl Parser {
+    pub fn init(scanner: Scanner, chunk: Rc<RefCell<Chunk>>) -> Self {
         Self {
-            scanner: scanner,
+            scanner: Rc::new(RefCell::new(scanner)),
             chunk: chunk,
             current: Token {
                 token_type: TokenType::EOF,
-                source: "",
+                source: "".to_owned(),
                 line: u32::MAX,
             },
             previous: Token {
                 token_type: TokenType::EOF,
-                source: "",
+                source: "".to_owned(),
                 line: u32::MAX,
             },
             had_error: false,
@@ -79,32 +80,44 @@ impl<'a> Parser<'a> {
         }
     }
     pub fn advance(&mut self) {
-        self.previous = self.current;
+        self.previous = self.current.clone();
+        println!("{:?}", self.previous);
         loop {
-            match self.scanner.scan_token().token_type {
-                TokenType::Error => self.error_at_current(self.current.source),
-                _ => break,
+            // let token = self.scanner.scan_token();
+            // let token = self.scanner.borrow_mut().scan_token();
+            let scanner_ref = self.scanner.clone();
+            let mut scanner = RefCell::borrow_mut(&scanner_ref);
+
+            let token = scanner.scan_token();
+            match token.token_type {
+                TokenType::Error => {
+                    let lexeme = self.current.source.clone();
+                    self.error_at_current(&lexeme);
+                }
+                _ => {
+                    self.current = token;
+                    break;
+                }
             }
         }
     }
 
     fn error_at_current(&mut self, message: &str) {
-        let token = self.current;
-        self.error_at(&token, message);
+        self.error_at(self.current.clone(), message);
     }
 
     fn error(&mut self, message: &str) {
-        let token = self.previous;
-        self.error_at(&token, message);
+        self.error_at(self.previous.clone(), message);
     }
 
     // FIXME: pass error details up in result type
-    fn error_at(&mut self, token: &Token<'_>, message: &str) {
+    fn error_at(&mut self, token: Token, message: &str) {
         if self.panic_mode {
             return;
         };
         self.panic_mode = true;
         let mut stderr = std::io::stderr();
+        let token = token;
         write!(stderr, "[line {}] Error", token.line).unwrap();
         match token.token_type {
             TokenType::EOF => write!(stderr, " at end").unwrap(),
@@ -134,7 +147,7 @@ impl<'a> Parser<'a> {
 
     fn number(&mut self) {
         // let number = f64::From(self.previous.source);
-        match f64::from_str(self.previous.source) {
+        match f64::from_str(self.previous.source.as_str()) {
             Ok(number) => self.emit_constant(Value(number)),
             // TODO: use InterprerError type?
             Err(e) => self.error("Failed to parse number."),
@@ -142,126 +155,299 @@ impl<'a> Parser<'a> {
     }
 
     fn unary(&mut self) {
-        let op_type = self.previous.token_type;
+        let prev_token = self.previous.clone();
+        let op_type = prev_token.token_type;
         self.parse_precedence(Precedence::Unary);
+        let chunk_ref = self.current_chunk();
+        let mut chunk = RefCell::borrow_mut(&chunk_ref);
         match op_type {
             TokenType::Minus => {
-                let line = self.previous.line;
-                self.current_chunk()
-                    .borrow_mut()
-                    .add_code_op(OpCode::Negate, line)
+                let line = prev_token.line;
+                chunk.add_code_op(OpCode::Negate, line)
             }
             _ => panic!("Unexpected token type for unary operator."),
         }
     }
 
     fn binary(&mut self) {
-        let op_type = self.previous.token_type;
-        let parse_rule = self.get_rule(Self::binary);
+        let prev_token = self.previous.clone();
+        let op_type = prev_token.token_type;
+        let parse_rule = self.get_rule(op_type);
         self.parse_precedence(parse_rule.precedence.next());
 
-        let line = self.previous.line;
+        let chunk_ref = self.current_chunk();
+        let mut chunk = RefCell::borrow_mut(&chunk_ref);
+        let line = prev_token.line;
         match op_type {
-            TokenType::Plus => self
-                .current_chunk()
-                .borrow_mut()
-                .add_code_op(OpCode::Add, line),
-            TokenType::Minus => self
-                .current_chunk()
-                .borrow_mut()
-                .add_code_op(OpCode::Subtract, line),
-            TokenType::Star => self
-                .current_chunk()
-                .borrow_mut()
-                .add_code_op(OpCode::Multiply, line),
-            TokenType::Slash => self
-                .current_chunk()
-                .borrow_mut()
-                .add_code_op(OpCode::Divide, line),
+            TokenType::Plus => chunk.add_code_op(OpCode::Add, line),
+            TokenType::Minus => chunk.add_code_op(OpCode::Subtract, line),
+            TokenType::Star => chunk.add_code_op(OpCode::Multiply, line),
+            TokenType::Slash => chunk.add_code_op(OpCode::Divide, line),
             _ => panic!("Unexpected token type for binary operator."),
         }
     }
 
     fn emit_constant(&mut self, value: Value) {
-        let chunk = self.current_chunk();
         let line = self.previous.line;
-        let constant_idx = self.current_chunk().borrow_mut().add_constant(value);
+        let chunk_ref = self.current_chunk();
+        let mut chunk = RefCell::borrow_mut(&chunk_ref);
+
+        let constant_idx = chunk.add_constant(value);
         if constant_idx.0 > 16777216 {
             // FIXME: error message
             self.error("Too many constants in one chunk.");
         } else if constant_idx.0 > 255 {
-            self.current_chunk()
-                .borrow_mut()
-                .add_code_constant_long(constant_idx, line)
+            chunk.add_code_op(OpCode::ConstantLong, line);
+            chunk.add_code_constant_long(constant_idx, line);
         } else {
-            self.current_chunk()
-                .borrow_mut()
-                .add_code_constant(constant_idx, line)
+            chunk.add_code_op(OpCode::Constant, line);
+            chunk.add_code_constant(constant_idx, line);
         }
     }
 
-    fn parse_precedence(&mut self, precedence: Precedence) {}
-
-    fn current_chunk(&self) -> &RefCell<Chunk> {
-        self.chunk
+    fn parse_precedence(&mut self, precedence: Precedence) {
+        self.advance();
+        let token_type = self.previous.token_type;
+        let prefix_rule = self.get_rule(token_type).prefix;
+        println!("{:?}", token_type);
+        match prefix_rule {
+            Some(prefix_rule) => prefix_rule(self),
+            None => {
+                self.error("Expect expression.");
+                return;
+            }
+        }
+        while precedence <= self.get_rule(self.current.token_type).precedence {
+            self.advance();
+            let infix_rule = self.get_rule(self.previous.token_type).infix;
+            infix_rule.unwrap()(self);
+        }
     }
 
+    // TODO: investigate refcell<chunk>. what is going on here. is this bad? how is this compiled?
+    fn current_chunk(&self) -> Rc<RefCell<Chunk>> {
+        self.chunk.clone()
+    }
+
+    // Vaughan-Pratt precendence rule lookup.
+    // TODO: revisit get ParseRule match -- Can we make this more performant? Does the compiler turn this into a LUT?
     fn get_rule(&self, op_type: TokenType) -> ParseRule {
         match op_type {
             TokenType::LeftParen => ParseRule {
                 prefix: Some(Self::grouping),
-                infix: todo!(),
-                precedence: todo!(),
+                infix: None,
+                precedence: Precedence::None,
             },
-            TokenType::RightParen => todo!(),
-            TokenType::LeftBrace => todo!(),
-            TokenType::RightBrace => todo!(),
-            TokenType::Comma => todo!(),
-            TokenType::Dot => todo!(),
-            TokenType::Minus => todo!(),
-            TokenType::Plus => todo!(),
-            TokenType::Semicolon => todo!(),
-            TokenType::Slash => todo!(),
-            TokenType::Star => todo!(),
-            TokenType::Bang => todo!(),
-            TokenType::BangEqual => todo!(),
-            TokenType::Equal => todo!(),
-            TokenType::EqualEqual => todo!(),
-            TokenType::Greater => todo!(),
-            TokenType::GreaterEqual => todo!(),
-            TokenType::Less => todo!(),
-            TokenType::LessEqual => todo!(),
-            TokenType::Identifier => todo!(),
-            TokenType::String => todo!(),
-            TokenType::Number => todo!(),
-            TokenType::And => todo!(),
-            TokenType::Class => todo!(),
-            TokenType::Else => todo!(),
-            TokenType::False => todo!(),
-            TokenType::For => todo!(),
-            TokenType::Fun => todo!(),
-            TokenType::If => todo!(),
-            TokenType::Nil => todo!(),
-            TokenType::Or => todo!(),
-            TokenType::Print => todo!(),
-            TokenType::Return => todo!(),
-            TokenType::Super => todo!(),
-            TokenType::This => todo!(),
-            TokenType::True => todo!(),
-            TokenType::Var => todo!(),
-            TokenType::While => todo!(),
-            TokenType::Error => todo!(),
-            TokenType::EOF => todo!(),
+            TokenType::RightParen => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::LeftBrace => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::RightBrace => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Comma => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Dot => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Minus => ParseRule {
+                prefix: Some(Self::unary),
+                infix: Some(Self::binary),
+                precedence: Precedence::Term,
+            },
+            TokenType::Plus => ParseRule {
+                prefix: None,
+                infix: Some(Self::binary),
+                precedence: Precedence::Term,
+            },
+            TokenType::Semicolon => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Slash => ParseRule {
+                prefix: None,
+                infix: Some(Self::binary),
+                precedence: Precedence::Factor,
+            },
+            TokenType::Star => ParseRule {
+                prefix: None,
+                infix: Some(Self::binary),
+                precedence: Precedence::Factor,
+            },
+            TokenType::Bang => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::BangEqual => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Equal => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::EqualEqual => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Greater => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::GreaterEqual => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Less => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::LessEqual => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Identifier => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::String => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Number => ParseRule {
+                prefix: Some(Self::number),
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::And => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Class => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Else => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::False => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::For => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Fun => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::If => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Nil => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Or => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Print => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Return => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Super => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::This => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::True => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Var => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::While => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Error => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::EOF => ParseRule {
+                prefix: None,
+                infix: None,
+                precedence: Precedence::None,
+            },
         }
     }
 }
 
-pub fn compile(source: String, chunk: &RefCell<Chunk>) -> Result<(), InterpretError> {
-    let mut scanner = Scanner::init(source);
-    let mut parser = Parser::init(&mut scanner, chunk);
+pub fn compile(source: String, chunk: Rc<RefCell<Chunk>>) -> Result<(), InterpretError> {
+    let scanner = Scanner::init(source);
+    let mut parser = Parser::init(scanner, chunk.clone());
     parser.advance();
     parser.expression();
     parser.consume(TokenType::EOF, "Expect end of expression.");
+    let chunk_ref = chunk.clone();
+    let mut chunk = RefCell::borrow_mut(&chunk_ref);
+    chunk.add_code_op(OpCode::Return, 5);
+
+    println!("{}", chunk);
 
     match parser.had_error {
         true => Err(InterpretError::CompileError),

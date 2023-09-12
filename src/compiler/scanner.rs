@@ -1,14 +1,23 @@
+use std::ops::DerefMut;
+
 pub struct Scanner {
     source: String,
     current: usize,
     start: usize,
     line: u32,
 }
-
-#[derive(Copy, Clone)]
-pub struct Token<'a> {
+// impl DerefMut for Scanner {
+//     type Target = Scanner;
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         &mut self
+//     }
+// }
+#[derive(Clone, Debug)]
+pub struct Token {
     pub token_type: TokenType,
-    pub source: &'a str,
+    // FIXME: fix when you're better
+    // pub source: &'source str,
+    pub source: String,
     pub line: u32,
 }
 
@@ -164,7 +173,7 @@ impl Scanner {
                 c if c.is_ascii_digit() => self.number(),
                 c if c.is_alphabetic() || c == '_' => self.identifier(),
 
-                _ => self.error_token("Unexpected character."),
+                _ => self.error_token("Unexpected character.".to_owned()),
             },
         }
     }
@@ -204,15 +213,15 @@ impl Scanner {
         }
     }
 
-    fn make_token(&self, token_type: TokenType) -> Token<'_> {
+    fn make_token(&self, token_type: TokenType) -> Token {
         Token {
             token_type: token_type,
-            source: &self.source[self.start..self.current],
+            source: self.source[self.start..self.current].to_string(),
             line: self.line,
         }
     }
 
-    fn error_token<'a>(&self, message: &'a str) -> Token<'a> {
+    fn error_token(&self, message: String) -> Token {
         Token {
             token_type: TokenType::Error,
             source: message,
@@ -244,21 +253,21 @@ impl Scanner {
         }
     }
 
-    fn string(&mut self) -> Token<'_> {
+    fn string(&mut self) -> Token {
         while self.peek() != '"' && !self.is_at_end() {
             if self.peek() == '\n' {
                 self.line += 1;
             }
         }
         if self.is_at_end() {
-            self.error_token("Unterminated string literal.")
+            self.error_token("Unterminated string literal.".to_owned())
         } else {
             self.advance();
             self.make_token(TokenType::String)
         }
     }
 
-    fn number(&mut self) -> Token<'_> {
+    fn number(&mut self) -> Token {
         while self.peek().is_ascii_digit() {
             self.advance();
         }
@@ -272,7 +281,7 @@ impl Scanner {
         self.make_token(TokenType::Number)
     }
 
-    fn identifier(&mut self) -> Token<'_> {
+    fn identifier(&mut self) -> Token {
         while self.peek().is_alphabetic() || self.peek() == '_' {
             self.advance();
         }

@@ -147,8 +147,10 @@ impl Parser {
 
     fn number(&mut self) {
         // let number = f64::From(self.previous.source);
+        println!("NUMBERRRR!");
+        println!("{}", self.previous.source);
         match f64::from_str(self.previous.source.as_str()) {
-            Ok(number) => self.emit_constant(Value(number)),
+            Ok(number) => self.emit_constant(Value::Double(number)),
             // TODO: use InterprerError type?
             Err(e) => self.error("Failed to parse number."),
         }
@@ -164,6 +166,10 @@ impl Parser {
             TokenType::Minus => {
                 let line = prev_token.line;
                 chunk.add_code_op(OpCode::Negate, line)
+            }
+            TokenType::Bang => {
+                let line = prev_token.line;
+                chunk.add_code_op(OpCode::Not, line);
             }
             _ => panic!("Unexpected token type for unary operator."),
         }
@@ -187,10 +193,26 @@ impl Parser {
         }
     }
 
-    fn emit_constant(&mut self, value: Value) {
-        let line = self.previous.line;
+    fn literal(&mut self) {
+        let token = &self.previous;
         let chunk_ref = self.current_chunk();
         let mut chunk = RefCell::borrow_mut(&chunk_ref);
+        let line = token.line;
+        match token.token_type {
+            TokenType::True => chunk.add_code_op(OpCode::True, line),
+            TokenType::False => chunk.add_code_op(OpCode::False, line),
+            TokenType::Nil => chunk.add_code_op(OpCode::Nil, line),
+            _ => panic!("Unexpected token type for literal expression."),
+        }
+    }
+
+    fn emit_constant(&mut self, value: Value) {
+        println!("emitting constatns.....");
+        let line = self.previous.line;
+        let chunk_ref = self.current_chunk();
+        println!("got chunk ref..");
+        let mut chunk = RefCell::borrow_mut(&chunk_ref);
+        println!("borrowed chunk...");
 
         let constant_idx = chunk.add_constant(value);
         if constant_idx.0 > 16777216 {
@@ -289,7 +311,7 @@ impl Parser {
                 precedence: Precedence::Factor,
             },
             TokenType::Bang => ParseRule {
-                prefix: None,
+                prefix: Some(Self::unary),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -359,7 +381,7 @@ impl Parser {
                 precedence: Precedence::None,
             },
             TokenType::False => ParseRule {
-                prefix: None,
+                prefix: Some(Self::literal),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -379,7 +401,7 @@ impl Parser {
                 precedence: Precedence::None,
             },
             TokenType::Nil => ParseRule {
-                prefix: None,
+                prefix: Some(Self::literal),
                 infix: None,
                 precedence: Precedence::None,
             },
@@ -409,7 +431,7 @@ impl Parser {
                 precedence: Precedence::None,
             },
             TokenType::True => ParseRule {
-                prefix: None,
+                prefix: Some(Self::literal),
                 infix: None,
                 precedence: Precedence::None,
             },

@@ -1,50 +1,57 @@
 use std::fmt;
 
 #[derive(Copy, Clone, Debug)]
-pub struct Value(pub f64);
+pub enum Value {
+    Double(f64),
+    Boolean(bool),
+    Nil,
+}
+impl Value {
+    pub fn is_falsey(&self) -> bool {
+        match self {
+            Value::Double(_) => false,
+            Value::Boolean(val) => !val,
+            Value::Nil => true,
+        }
+    }
+}
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)?;
-        Ok(())
+        match self {
+            Value::Double(val) => write!(f, "{}", val),
+            Value::Boolean(val) => write!(f, "{}", val),
+            Value::Nil => write!(f, "nil"),
+        }
     }
 }
 
 impl std::ops::Neg for Value {
     type Output = Self;
+
+    #[inline(always)]
     fn neg(self) -> Self::Output {
-        Value(-self.0)
+        match self {
+            Value::Double(double) => Value::Double(-double),
+            _ => panic!("UNSUPPORTED OPERATION ON THIS TYPE"),
+        }
     }
 }
 
 impl std::ops::Add for Value {
     type Output = Self;
 
+    #[inline(always)]
     fn add(self, rhs: Self) -> Self::Output {
-        Value(self.0 + rhs.0)
-    }
-}
-
-impl std::ops::Sub for Value {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Value(self.0 - rhs.0)
-    }
-}
-
-impl std::ops::Mul for Value {
-    type Output = Self;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        Value(self.0 * rhs.0)
-    }
-}
-
-impl std::ops::Div for Value {
-    type Output = Self;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        Value(self.0 / rhs.0)
+        match self {
+            Value::Double(double) => {
+                if let Value::Double(rhs_double) = rhs {
+                    Value::Double(double + rhs_double)
+                } else {
+                    panic!("BOTH OPERANDS OF ADD MUST BE DOUBLE")
+                }
+            }
+            _ => panic!("UNSUPPORTED OPERATION ON THIS TYPE"),
+        }
     }
 }

@@ -28,14 +28,14 @@ pub struct VM {
 }
 const STACK_MAX: usize = 256;
 
-type BinaryOp = fn(Value, Value) -> Value;
+type BinaryOp<T> = fn(T, T) -> T;
 
 impl VM {
     pub fn init() -> Self {
         let vm = VM {
             chunk: Rc::new(RefCell::new(Chunk::new())),
             ip: std::ptr::null_mut(),
-            stack: [Value(0.0); STACK_MAX],
+            stack: [Value::Nil; STACK_MAX],
             // stack_top: std::ptr::null_mut(),
             stack_idx: 0,
         };
@@ -133,17 +133,27 @@ impl VM {
                     self.push(negated);
                 }
                 OpCode::Add => {
-                    self.binary_op(|a, b| a + b);
+                    self.binary_op_double(|a, b| a + b)?;
                 }
                 OpCode::Subtract => {
-                    self.binary_op(|a, b| a - b);
+                    self.binary_op_double(|a, b| a - b)?;
                 }
                 OpCode::Multiply => {
-                    self.binary_op(|a, b| a * b);
+                    self.binary_op_double(|a, b| a * b)?;
                 }
                 OpCode::Divide => {
-                    self.binary_op(|a, b| a / b);
+                    self.binary_op_double(|a, b| a / b)?;
                 }
+                OpCode::Nil => self.push(Value::Nil),
+                OpCode::True => self.push(Value::Boolean(true)),
+                OpCode::False => self.push(Value::Boolean(false)),
+                OpCode::Not => {
+                    let val = self.pop();
+                    self.push(Value::Boolean(val.is_falsey()))
+                }
+                OpCode::Equal => todo!(),
+                OpCode::Greater => todo!(),
+                OpCode::Less => todo!(),
             }
         }
     }
@@ -196,11 +206,27 @@ impl VM {
         self.stack[self.stack_idx]
     }
 
+    pub fn peek(&self, distance: usize) -> &Value {
+        &self.stack[self.stack_idx - 1 - distance]
+    }
+
     #[inline(always)]
-    fn binary_op(&mut self, f: BinaryOp) {
+    fn binary_op_double(&mut self, f: BinaryOp<f64>) -> Result<(), InterpretError> {
+        if !matches!(self.peek(0), Value::Double(_)) || !matches!(self.peek(1), Value::Double(_)) {
+            return Err(self.runtime_error("Operands must be numbers."));
+        }
         let a = self.pop();
         let b = self.pop();
-        self.push(f(b, a));
+        match a {
+            Value::Double(right) => {
+                if let Value::Double(left) = b {
+                    Ok(self.push(Value::Double(f(left, right))))
+                } else {
+                    panic!("Found unexpected non-Double value after validation.");
+                }
+            }
+            _ => panic!("Found unexpected non-Double value after validation."),
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -209,12 +235,17 @@ impl VM {
         for i in 0..self.stack_idx {
             print!("[{}]", self.stack[i]);
         }
-        // let mut sp = &self.stack[0] as *const Value;
-        // println!("{:?}, {:?}", self.stack_top, sp);
-        // while sp < self.stack_top {
-        //     print!("[{}]", unsafe { *sp });
-        //     sp = unsafe { sp.add(1) };
-        // }
         println!();
+    }
+
+    fn runtime_error(&self, message: &str) -> InterpretError {
+        println!("{}", message);
+
+        let chunk = self.chunk.borrow();
+        let start_ptr = &chunk.code[0] as *const u8;
+        let offset = (self.ip as usize) - (start_ptr as usize);
+        let line = chunk.lines[offset];
+        println!("line [{}] in script", line);
+        InterpretError::RuntimeError
     }
 }

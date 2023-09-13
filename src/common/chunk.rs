@@ -20,11 +20,18 @@ pub enum OpCode {
     Return = 0,
     Constant = 1,
     ConstantLong = 2,
-    Negate = 3,
-    Add = 4,
-    Subtract = 5,
-    Multiply = 6,
-    Divide = 7,
+    Nil = 3,
+    True = 4,
+    False = 5,
+    Negate = 6,
+    Add = 7,
+    Subtract = 8,
+    Multiply = 9,
+    Divide = 10,
+    Not = 11,
+    Equal = 12,
+    Greater = 13,
+    Less = 14,
 }
 impl From<u8> for OpCode {
     fn from(value: u8) -> Self {
@@ -32,11 +39,18 @@ impl From<u8> for OpCode {
             0 => OpCode::Return,
             1 => OpCode::Constant,
             2 => OpCode::ConstantLong,
-            3 => OpCode::Negate,
-            4 => OpCode::Add,
-            5 => OpCode::Subtract,
-            6 => OpCode::Multiply,
-            7 => OpCode::Divide,
+            3 => OpCode::Nil,
+            4 => OpCode::True,
+            5 => OpCode::False,
+            6 => OpCode::Negate,
+            7 => OpCode::Add,
+            8 => OpCode::Subtract,
+            9 => OpCode::Multiply,
+            10 => OpCode::Divide,
+            11 => OpCode::Not,
+            12 => OpCode::Equal,
+            13 => OpCode::Greater,
+            14 => OpCode::Less,
             unrecognized => panic!("Unrecognized opcode {}", unrecognized),
         }
     }
@@ -47,7 +61,7 @@ pub struct ConstantIdx(pub u32);
 
 pub struct Chunk {
     pub code: Vec<u8>,
-    lines: Vec<u32>,
+    pub lines: Vec<u32>,
     pub constants: Vec<Value>,
 }
 
@@ -71,17 +85,31 @@ impl Chunk {
     }
 
     pub fn add_constant(&mut self, constant: Value) -> ConstantIdx {
+        println!("pushing..");
         self.constants.push(constant);
+
+        #[cfg(debug_assertions)]
+        println!(
+            "Adding constant {} ({})",
+            constant,
+            self.constants.len() - 1
+        );
         return ConstantIdx((self.constants.len() - 1) as u32);
     }
 
     pub fn add_code_op(&mut self, code: OpCode, line: u32) {
+        #[cfg(debug_assertions)]
+        println!("Adding op {:?}", code);
+
         self.code.push(code as u8);
         self.lines.push(line);
     }
 
     // TODO: refactor to combine with add_code_contant_long?
     pub fn add_code_constant(&mut self, constant: ConstantIdx, line: u32) {
+        #[cfg(debug_assertions)]
+        println!("Pushing constant {:?}", constant);
+
         assert!(
             constant.0 <= 255,
             "Single operand (short) constant index must be < 256."

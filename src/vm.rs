@@ -28,14 +28,14 @@ pub struct VM {
 }
 const STACK_MAX: usize = 256;
 
-type BinaryOp<T> = fn(T, T) -> T;
+type BinaryOp<I, O> = fn(I, I) -> O;
 
 impl VM {
     pub fn init() -> Self {
         let vm = VM {
             chunk: Rc::new(RefCell::new(Chunk::new())),
             ip: std::ptr::null_mut(),
-            stack: [Value::Nil; STACK_MAX],
+            stack: std::array::from_fn(|_| Value::Nil),
             // stack_top: std::ptr::null_mut(),
             stack_idx: 0,
         };
@@ -133,16 +133,16 @@ impl VM {
                     self.push(negated);
                 }
                 OpCode::Add => {
-                    self.binary_op_double(|a, b| a + b)?;
+                    self.binary_op(|a, b| Value::Double(a + b))?;
                 }
                 OpCode::Subtract => {
-                    self.binary_op_double(|a, b| a - b)?;
+                    self.binary_op(|a, b| Value::Double(a - b))?;
                 }
                 OpCode::Multiply => {
-                    self.binary_op_double(|a, b| a * b)?;
+                    self.binary_op(|a, b| Value::Double(a * b))?;
                 }
                 OpCode::Divide => {
-                    self.binary_op_double(|a, b| a / b)?;
+                    self.binary_op(|a, b| Value::Double(a / b))?;
                 }
                 OpCode::Nil => self.push(Value::Nil),
                 OpCode::True => self.push(Value::Boolean(true)),
@@ -151,9 +151,14 @@ impl VM {
                     let val = self.pop();
                     self.push(Value::Boolean(val.is_falsey()))
                 }
-                OpCode::Equal => todo!(),
-                OpCode::Greater => todo!(),
-                OpCode::Less => todo!(),
+                OpCode::Equal => {
+                    let a = self.pop();
+                    let b = self.pop();
+
+                    self.push(Value::Boolean(values_equal(a, b)))
+                }
+                OpCode::Greater => self.binary_op(|a, b| Value::Boolean(a > b))?,
+                OpCode::Less => self.binary_op(|a, b| Value::Boolean(a < b))?,
             }
         }
     }
@@ -168,7 +173,7 @@ impl VM {
     #[inline(always)]
     fn read_constant(&mut self) -> Value {
         let idx = self.read_byte();
-        return self.chunk.borrow().constants[idx as usize];
+        return self.chunk.borrow().constants[idx as usize].clone();
     }
 
     #[inline(always)]
@@ -177,7 +182,7 @@ impl VM {
         unsafe { std::ptr::copy_nonoverlapping(self.ip, &mut bytes as *mut u8, 3) };
         self.ip = unsafe { self.ip.add(3) };
         let idx = u32::from_le_bytes(bytes);
-        return self.chunk.borrow().constants[idx as usize];
+        return self.chunk.borrow().constants[idx as usize].clone();
     }
 
     #[inline(always)]
@@ -203,28 +208,23 @@ impl VM {
         // let ret = unsafe { *self.stack_top };
         // ret
         self.stack_idx -= 1;
-        self.stack[self.stack_idx]
+        self.stack[self.stack_idx].clone()
     }
 
+    #[inline(always)]
     pub fn peek(&self, distance: usize) -> &Value {
         &self.stack[self.stack_idx - 1 - distance]
     }
 
     #[inline(always)]
-    fn binary_op_double(&mut self, f: BinaryOp<f64>) -> Result<(), InterpretError> {
+    fn binary_op(&mut self, f: BinaryOp<f64, Value>) -> Result<(), InterpretError> {
         if !matches!(self.peek(0), Value::Double(_)) || !matches!(self.peek(1), Value::Double(_)) {
             return Err(self.runtime_error("Operands must be numbers."));
         }
         let a = self.pop();
         let b = self.pop();
-        match a {
-            Value::Double(right) => {
-                if let Value::Double(left) = b {
-                    Ok(self.push(Value::Double(f(left, right))))
-                } else {
-                    panic!("Found unexpected non-Double value after validation.");
-                }
-            }
+        match (a, b) {
+            (Value::Double(right), Value::Double(left)) => Ok(self.push(f(left, right))),
             _ => panic!("Found unexpected non-Double value after validation."),
         }
     }
@@ -238,7 +238,7 @@ impl VM {
         println!();
     }
 
-    fn runtime_error(&self, message: &str) -> InterpretError {
+    fn runtime_error(&mut self, message: &str) -> InterpretError {
         println!("{}", message);
 
         let chunk = self.chunk.borrow();
@@ -247,5 +247,14 @@ impl VM {
         let line = chunk.lines[offset];
         println!("line [{}] in script", line);
         InterpretError::RuntimeError
+    }
+}
+
+fn values_equal(a: Value, b: Value) -> bool {
+    match (a, b) {
+        (Value::Boolean(a), Value::Boolean(b)) => a == b,
+        (Value::Double(a), Value::Double(b)) => a == b,
+        (Value::Nil, Value::Nil) => true,
+        _ => false,
     }
 }

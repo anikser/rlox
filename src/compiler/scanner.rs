@@ -205,7 +205,7 @@ impl Scanner {
     }
 
     fn peek_match(&mut self, c: char) -> bool {
-        if c == self.peek_next() {
+        if c == self.peek() {
             self.current += 1;
             true
         } else {

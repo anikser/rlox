@@ -189,6 +189,21 @@ impl Parser {
             TokenType::Minus => chunk.add_code_op(OpCode::Subtract, line),
             TokenType::Star => chunk.add_code_op(OpCode::Multiply, line),
             TokenType::Slash => chunk.add_code_op(OpCode::Divide, line),
+            TokenType::EqualEqual => chunk.add_code_op(OpCode::Equal, line),
+            TokenType::BangEqual => {
+                chunk.add_code_op(OpCode::Equal, line);
+                chunk.add_code_op(OpCode::Not, line)
+            }
+            TokenType::Less => chunk.add_code_op(OpCode::Less, line),
+            TokenType::LessEqual => {
+                chunk.add_code_op(OpCode::Greater, line);
+                chunk.add_code_op(OpCode::Not, line)
+            }
+            TokenType::Greater => chunk.add_code_op(OpCode::Greater, line),
+            TokenType::GreaterEqual => {
+                chunk.add_code_op(OpCode::Less, line);
+                chunk.add_code_op(OpCode::Not, line)
+            }
             _ => panic!("Unexpected token type for binary operator."),
         }
     }
@@ -317,8 +332,8 @@ impl Parser {
             },
             TokenType::BangEqual => ParseRule {
                 prefix: None,
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(Self::binary),
+                precedence: Precedence::Equality,
             },
             TokenType::Equal => ParseRule {
                 prefix: None,
@@ -327,28 +342,28 @@ impl Parser {
             },
             TokenType::EqualEqual => ParseRule {
                 prefix: None,
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(Self::binary),
+                precedence: Precedence::Equality,
             },
             TokenType::Greater => ParseRule {
                 prefix: None,
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(Self::binary),
+                precedence: Precedence::Comparison,
             },
             TokenType::GreaterEqual => ParseRule {
                 prefix: None,
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(Self::binary),
+                precedence: Precedence::Comparison,
             },
             TokenType::Less => ParseRule {
                 prefix: None,
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(Self::binary),
+                precedence: Precedence::Comparison,
             },
             TokenType::LessEqual => ParseRule {
                 prefix: None,
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(Self::binary),
+                precedence: Precedence::Comparison,
             },
             TokenType::Identifier => ParseRule {
                 prefix: None,

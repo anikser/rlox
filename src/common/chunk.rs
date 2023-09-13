@@ -85,15 +85,16 @@ impl Chunk {
     }
 
     pub fn add_constant(&mut self, constant: Value) -> ConstantIdx {
-        println!("pushing..");
+        #[cfg(debug_assertions)]
+        {
+            println!(
+                "Adding constant {} ({})",
+                constant.clone(),
+                self.constants.len()
+            );
+        }
         self.constants.push(constant);
 
-        #[cfg(debug_assertions)]
-        println!(
-            "Adding constant {} ({})",
-            constant,
-            self.constants.len() - 1
-        );
         return ConstantIdx((self.constants.len() - 1) as u32);
     }
 

@@ -1,6 +1,6 @@
 use crate::{
     common::Chunk,
-    common::{OpCode, Value},
+    common::{HeapValue, Obj, OpCode, Value},
     compiler::scanner::Scanner,
     vm::InterpretError,
 };
@@ -152,7 +152,7 @@ impl Parser {
         match f64::from_str(self.previous.source.as_str()) {
             Ok(number) => self.emit_constant(Value::Double(number)),
             // TODO: use InterprerError type?
-            Err(e) => self.error("Failed to parse number."),
+            Err(_) => self.error("Failed to parse number."),
         }
     }
 
@@ -219,6 +219,13 @@ impl Parser {
             TokenType::Nil => chunk.add_code_op(OpCode::Nil, line),
             _ => panic!("Unexpected token type for literal expression."),
         }
+    }
+
+    fn string(&mut self) {
+        let token = &self.previous;
+        self.emit_constant(Value::Object(Obj {
+            value: HeapValue::String(token.source.clone().into()),
+        }));
     }
 
     fn emit_constant(&mut self, value: Value) {
@@ -371,7 +378,7 @@ impl Parser {
                 precedence: Precedence::None,
             },
             TokenType::String => ParseRule {
-                prefix: None,
+                prefix: Some(Self::string),
                 infix: None,
                 precedence: Precedence::None,
             },

@@ -12,7 +12,7 @@ fn main() -> Result<(), InterpretError> {
     let args: Vec<String> = env::args().collect();
     match args.len() {
         1 => vm.repl(),
-        2 => vm.run_file(&args[0]),
+        2 => vm.run_file(&args[1]),
         _ => {
             println!("Usage: rlox [path]");
             std::process::exit(64);

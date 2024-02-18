@@ -4,7 +4,7 @@ use std::fmt;
 pub enum Value {
     Double(f64),
     Boolean(bool),
-    Obj(HeapValue),
+    Object(Obj),
     Nil,
 }
 
@@ -13,8 +13,21 @@ impl Value {
         match self {
             Value::Double(_) => false,
             Value::Boolean(val) => !val,
-            Value::Obj(_) => false,
+            Value::Object(_) => false,
             Value::Nil => true,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Obj {
+    pub value: HeapValue,
+}
+
+impl PartialEq for Obj {
+    fn eq(&self, other: &Obj) -> bool {
+        match (&self.value, &other.value) {
+            (HeapValue::String(a), HeapValue::String(b)) => a.eq(&b),
         }
     }
 }
@@ -29,7 +42,7 @@ impl fmt::Display for Value {
         match self {
             Value::Double(val) => write!(f, "{}", val),
             Value::Boolean(val) => write!(f, "{}", val),
-            Value::Obj(val) => write!(f, "{:?}", val),
+            Value::Object(val) => write!(f, "{:?}", val),
             Value::Nil => write!(f, "nil"),
         }
     }

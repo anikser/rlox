@@ -1,5 +1,3 @@
-use std::ops::DerefMut;
-
 pub struct Scanner {
     source: String,
     current: usize,
@@ -221,6 +219,14 @@ impl Scanner {
         }
     }
 
+    fn make_string_token(&self) -> Token {
+        Token {
+            token_type: TokenType::String,
+            source: self.source[self.start + 1..self.current - 1].to_string(),
+            line: self.line,
+        }
+    }
+
     fn error_token(&self, message: String) -> Token {
         Token {
             token_type: TokenType::Error,
@@ -258,12 +264,13 @@ impl Scanner {
             if self.peek() == '\n' {
                 self.line += 1;
             }
+            self.advance();
         }
         if self.is_at_end() {
             self.error_token("Unterminated string literal.".to_owned())
         } else {
             self.advance();
-            self.make_token(TokenType::String)
+            self.make_string_token()
         }
     }
 

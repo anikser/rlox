@@ -5,8 +5,8 @@ use std::{
     rc::Rc,
 };
 
-use crate::common::Value;
-use crate::common::{Chunk, OpCode};
+use crate::common::{Chunk, Obj, OpCode};
+use crate::common::{HeapValue, Value};
 
 use crate::compiler::*;
 
@@ -57,7 +57,8 @@ impl VM {
                 }
                 Ok(line) => {
                     // TODO: exception handling here
-                    self.interpret(line);
+                    self.interpret(line)
+                        .unwrap_or_else(|_| println!("Error executing REPL"));
                 }
                 Err(err) => {
                     println!("{}", err);
@@ -68,6 +69,7 @@ impl VM {
     }
 
     pub fn run_file(&mut self, path: &String) {
+        println!("Readind path {}", path);
         let contents = fs::read_to_string(path);
         match contents {
             Ok(contents) => {
@@ -81,7 +83,7 @@ impl VM {
             Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
                 println!("Permission denied reading file.")
             }
-            Err(_) => println!("Unexpected error reading file."),
+            Err(e) => println!("Unexpected error reading file. {:?}", e),
         }
     }
 
@@ -132,18 +134,22 @@ impl VM {
                     let negated = -self.pop();
                     self.push(negated);
                 }
-                OpCode::Add => {
-                    self.binary_op(|a, b| Value::Double(a + b))?;
-                }
-                OpCode::Subtract => {
-                    self.binary_op(|a, b| Value::Double(a - b))?;
-                }
-                OpCode::Multiply => {
-                    self.binary_op(|a, b| Value::Double(a * b))?;
-                }
-                OpCode::Divide => {
-                    self.binary_op(|a, b| Value::Double(a / b))?;
-                }
+                OpCode::Add => match (self.peek(0), self.peek(1)) {
+                    (
+                        Value::Object(Obj {
+                            value: HeapValue::String(_),
+                        }),
+                        Value::Object(Obj {
+                            value: HeapValue::String(_),
+                        }),
+                    ) => {
+                        self.string_concat()?;
+                    }
+                    (_, _) => self.binary_op(|a, b| Value::Double(a + b))?,
+                },
+                OpCode::Subtract => self.binary_op(|a, b| Value::Double(a - b))?,
+                OpCode::Multiply => self.binary_op(|a, b| Value::Double(a * b))?,
+                OpCode::Divide => self.binary_op(|a, b| Value::Double(a / b))?,
                 OpCode::Nil => self.push(Value::Nil),
                 OpCode::True => self.push(Value::Boolean(true)),
                 OpCode::False => self.push(Value::Boolean(false)),
@@ -229,6 +235,43 @@ impl VM {
         }
     }
 
+    fn string_concat(&mut self) -> Result<(), InterpretError> {
+        if !matches!(
+            self.peek(0),
+            Value::Object(Obj {
+                value: HeapValue::String(_)
+            })
+        ) || !matches!(
+            self.peek(1),
+            Value::Object(Obj {
+                value: HeapValue::String(_)
+            })
+        ) {
+            return Err(self.runtime_error("Operands must be strings."));
+        }
+        let a = self.pop();
+        let b = self.pop();
+        match (a, b) {
+            (
+                Value::Object(Obj {
+                    value: HeapValue::String(right),
+                }),
+                Value::Object(Obj {
+                    value: HeapValue::String(left),
+                }),
+            ) => {
+                let mut new_string = String::with_capacity(left.len() + right.len());
+                new_string.push_str(&left);
+                new_string.push_str(&right);
+                self.push(Value::Object(Obj {
+                    value: HeapValue::String(new_string.into_boxed_str()),
+                }));
+                Ok(())
+            }
+            _ => panic!("Found unexpected non-Double value after validation."),
+        }
+    }
+
     #[cfg(debug_assertions)]
     fn print_stack(&mut self) {
         print!("        ");
@@ -254,6 +297,7 @@ fn values_equal(a: Value, b: Value) -> bool {
     match (a, b) {
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
         (Value::Double(a), Value::Double(b)) => a == b,
+        (Value::Object(a), Value::Object(b)) => a == b,
         (Value::Nil, Value::Nil) => true,
         _ => false,
     }

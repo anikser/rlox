@@ -1,6 +1,6 @@
 use crate::{
     common::Chunk,
-    common::{HeapValue, Obj, OpCode, Value},
+    common::{HeapValue, Obj, ObjString, OpCode, Value},
     compiler::scanner::Scanner,
     vm::InterpretError,
 };
@@ -224,7 +224,8 @@ impl Parser {
     fn string(&mut self) {
         let token = &self.previous;
         self.emit_constant(Value::Object(Obj {
-            value: HeapValue::String(token.source.clone().into()),
+            value: HeapValue::String(ObjString::of_borrow(&token.source)),
+            next: None,
         }));
     }
 

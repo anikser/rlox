@@ -1,11 +1,12 @@
 use std::{
     cell::RefCell,
+    collections::HashMap,
     fs,
     io::{self, BufRead, Write},
     rc::Rc,
 };
 
-use crate::common::{Chunk, Obj, OpCode};
+use crate::common::{Chunk, Obj, ObjString, OpCode};
 use crate::common::{HeapValue, Value};
 
 use crate::compiler::*;
@@ -25,6 +26,7 @@ pub struct VM {
     stack: [Value; STACK_MAX],
     // TODO: revisit this too.. is there a point?
     stack_idx: usize,
+    objects: Option<*const Obj>,
 }
 const STACK_MAX: usize = 256;
 
@@ -38,6 +40,7 @@ impl VM {
             stack: std::array::from_fn(|_| Value::Nil),
             // stack_top: std::ptr::null_mut(),
             stack_idx: 0,
+            objects: None,
         };
         vm
     }
@@ -49,19 +52,22 @@ impl VM {
             print!(">");
             io::stdout().flush().unwrap();
             // let result = { stdin.read_line(&mut buffer) };
-            match iterator.next().unwrap() {
+            match iterator.next() {
                 // Ok(bytes_read) if bytes_read == 0 => {
-                Ok(line) if line.len() == 0 => {
+                Some(Ok(line)) if line.len() == 0 => {
                     println!();
                     break;
                 }
-                Ok(line) => {
+                Some(Ok(line)) => {
                     // TODO: exception handling here
                     self.interpret(line)
                         .unwrap_or_else(|_| println!("Error executing REPL"));
                 }
-                Err(err) => {
+                Some(Err(err)) => {
                     println!("{}", err);
+                    break;
+                }
+                None => {
                     break;
                 }
             }
@@ -138,9 +144,11 @@ impl VM {
                     (
                         Value::Object(Obj {
                             value: HeapValue::String(_),
+                            next: _,
                         }),
                         Value::Object(Obj {
                             value: HeapValue::String(_),
+                            next: _,
                         }),
                     ) => {
                         self.string_concat()?;
@@ -161,7 +169,7 @@ impl VM {
                     let a = self.pop();
                     let b = self.pop();
 
-                    self.push(Value::Boolean(values_equal(a, b)))
+                    self.push(Value::Boolean(a == b))
                 }
                 OpCode::Greater => self.binary_op(|a, b| Value::Boolean(a > b))?,
                 OpCode::Less => self.binary_op(|a, b| Value::Boolean(a < b))?,
@@ -239,12 +247,14 @@ impl VM {
         if !matches!(
             self.peek(0),
             Value::Object(Obj {
-                value: HeapValue::String(_)
+                value: HeapValue::String(_),
+                next: _,
             })
         ) || !matches!(
             self.peek(1),
             Value::Object(Obj {
-                value: HeapValue::String(_)
+                value: HeapValue::String(_),
+                next: _,
             })
         ) {
             return Err(self.runtime_error("Operands must be strings."));
@@ -255,17 +265,19 @@ impl VM {
             (
                 Value::Object(Obj {
                     value: HeapValue::String(right),
+                    next: _,
                 }),
                 Value::Object(Obj {
                     value: HeapValue::String(left),
+                    next: _,
                 }),
             ) => {
-                let mut new_string = String::with_capacity(left.len() + right.len());
-                new_string.push_str(&left);
-                new_string.push_str(&right);
-                self.push(Value::Object(Obj {
-                    value: HeapValue::String(new_string.into_boxed_str()),
-                }));
+                let mut new_string = String::with_capacity(left.value.len() + right.value.len());
+                new_string.push_str(&left.value);
+                new_string.push_str(&right.value);
+
+                let obj = self.create_object(HeapValue::String(ObjString::of(new_string)));
+                self.push(Value::Object(obj));
                 Ok(())
             }
             _ => panic!("Found unexpected non-Double value after validation."),
@@ -291,14 +303,24 @@ impl VM {
         println!("line [{}] in script", line);
         InterpretError::RuntimeError
     }
+
+    fn create_object(&mut self, value: HeapValue) -> Obj {
+        let obj = Obj {
+            value: value,
+            next: self.objects.take(),
+        };
+        self.objects = Some(&obj);
+        obj
+    }
+
+    fn free_objects(&mut self) {
+        let mut maybe_obj = self.objects;
+        while let Some(obj) = maybe_obj {}
+    }
 }
 
-fn values_equal(a: Value, b: Value) -> bool {
-    match (a, b) {
-        (Value::Boolean(a), Value::Boolean(b)) => a == b,
-        (Value::Double(a), Value::Double(b)) => a == b,
-        (Value::Object(a), Value::Object(b)) => a == b,
-        (Value::Nil, Value::Nil) => true,
-        _ => false,
+impl Drop for VM {
+    fn drop(&mut self) {
+        self.free_objects();
     }
 }

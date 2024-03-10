@@ -36,6 +36,10 @@ impl Table {
         is_new
     }
 
+    pub fn get(&self, key:Box<ObjString>) -> Option<{
+
+    }
+
     fn find_entry_idx(
         entries: &Vec<Option<Entry>>,
         capacity: usize,

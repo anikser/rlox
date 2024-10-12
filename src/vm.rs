@@ -1,12 +1,12 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
     fs,
     io::{self, BufRead, Write},
     rc::Rc,
 };
 
-use crate::common::{Chunk, Obj, ObjString, OpCode};
+use crate::common::Table;
+use crate::common::{BoxedObjString, Chunk, Obj, OpCode};
 use crate::common::{HeapValue, Value};
 
 use crate::compiler::*;
@@ -27,7 +27,9 @@ pub struct VM {
     // TODO: revisit this too.. is there a point?
     stack_idx: usize,
     objects: Option<*const Obj>,
+    strings: Table<BoxedObjString, ()>,
 }
+
 const STACK_MAX: usize = 256;
 
 type BinaryOp<I, O> = fn(I, I) -> O;
@@ -41,6 +43,7 @@ impl VM {
             // stack_top: std::ptr::null_mut(),
             stack_idx: 0,
             objects: None,
+            strings: Table::new(),
         };
         vm
     }
@@ -187,7 +190,8 @@ impl VM {
     #[inline(always)]
     fn read_constant(&mut self) -> Value {
         let idx = self.read_byte();
-        return self.chunk.borrow().constants[idx as usize].clone();
+        let val = self.chunk.borrow().constants[idx as usize].clone();
+        return val;
     }
 
     #[inline(always)]
@@ -272,11 +276,15 @@ impl VM {
                     next: _,
                 }),
             ) => {
-                let mut new_string = String::with_capacity(left.value.len() + right.value.len());
-                new_string.push_str(&left.value);
-                new_string.push_str(&right.value);
+                let mut new_string = String::with_capacity(left.len() + right.len());
+                let left_str = left.as_str();
+                let right_str = right.as_str();
+                new_string.push_str(left_str);
+                new_string.push_str(right_str);
 
-                let obj = self.create_object(HeapValue::String(ObjString::of(new_string)));
+                let res = BoxedObjString::of(new_string);
+
+                let obj = self.create_object(HeapValue::String(res));
                 self.push(Value::Object(obj));
                 Ok(())
             }
@@ -306,7 +314,7 @@ impl VM {
 
     fn create_object(&mut self, value: HeapValue) -> Obj {
         let obj = Obj {
-            value: value,
+            value,
             next: self.objects.take(),
         };
         self.objects = Some(&obj);
@@ -314,8 +322,12 @@ impl VM {
     }
 
     fn free_objects(&mut self) {
-        let mut maybe_obj = self.objects;
-        while let Some(obj) = maybe_obj {}
+        let maybe_obj = self.objects;
+        while let Some(obj_ref) = maybe_obj {
+            unsafe {
+                let obj = obj_ref.as_ref();
+            };
+        }
     }
 }
 

@@ -1,4 +1,7 @@
+use std::alloc::{alloc, Layout};
 use std::fmt;
+
+use super::table::Hashable;
 
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -76,30 +79,37 @@ impl fmt::Display for Obj {
 
 #[derive(Clone, Debug)]
 pub enum HeapValue {
-    String(ObjString),
+    String(BoxedObjString),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
+struct Inner {
+    length: usize,
+    hash: u32,
+}
+
+#[derive(Debug)]
 pub struct ObjString {
-    pub value: Box<str>,
-    pub hash: u32,
+    inner: Inner,
+    data: [u8],
 }
+
 impl ObjString {
-    pub fn of_borrow(source: &String) -> Self {
-        Self {
-            value: source.as_str().into(),
-            hash: Self::hash(source.as_str()),
-        }
+    fn get_layout(length: usize) -> (Layout, usize) {
+        Layout::array::<u8>(length)
+            .and_then(|layout| Layout::new::<Inner>().extend(layout))
+            .unwrap()
     }
 
-    pub fn of(source: String) -> Self {
-        Self {
-            value: source.as_str().into(),
-            hash: Self::hash(source.as_str()),
-        }
+    pub fn as_str(&self) -> &str {
+        unsafe { std::str::from_utf8_unchecked(&self.data[0..self.inner.length]) }
     }
 
-    fn hash(key: &str) -> u32 {
+    pub fn len(&self) -> usize {
+        self.inner.length
+    }
+
+    fn calc_hash(key: &str) -> u32 {
         let mut hash: u32 = 2166136261;
         for x in key.as_bytes() {
             hash ^= *x as u32;
@@ -109,10 +119,97 @@ impl ObjString {
     }
 }
 
+#[derive(Debug)]
+pub struct BoxedObjString(Box<ObjString>);
+
+impl BoxedObjString {
+    pub fn of_ref(source: &String) -> Self {
+        let byte_array = source.as_bytes();
+        let inner = Inner {
+            length: byte_array.len(),
+            hash: ObjString::calc_hash(source.as_str()),
+        };
+        let (layout, arr_base) = ObjString::get_layout(inner.length);
+        let ptr = unsafe { alloc(layout) };
+        if ptr.is_null() {
+            panic!("Failed to allocate ObjString");
+        }
+        unsafe {
+            ptr.cast::<Inner>().write(inner);
+            let tmp_ptr = ptr.cast::<u8>().add(arr_base);
+            for (i, x) in byte_array.iter().enumerate() {
+                tmp_ptr.add(i).write(*x);
+            }
+        }
+        unsafe {
+            Self(Box::from_raw(
+                std::ptr::slice_from_raw_parts_mut(ptr as *mut usize, layout.size())
+                    as *mut ObjString,
+            ))
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn of(source: String) -> Self {
+        Self::of_ref(&source)
+    }
+}
+
+impl Clone for BoxedObjString {
+    fn clone(&self) -> Self {
+        let (layout, arr_base) = Layout::array::<u8>(self.0.inner.length)
+            .and_then(|layout| Layout::new::<Inner>().extend(layout))
+            .unwrap();
+        let ptr = unsafe { alloc(layout) };
+        if ptr.is_null() {
+            panic!("Failed to allocate ObjString");
+        }
+        unsafe {
+            ptr.cast::<Inner>().write(self.0.inner);
+            let tmp_ptr = ptr.cast::<u8>().add(arr_base);
+            for i in 0..(self.0.inner.length) {
+                tmp_ptr.add(i).write(self.0.data[i]);
+            }
+        }
+        unsafe {
+            Self(Box::from_raw(
+                std::ptr::slice_from_raw_parts_mut(ptr as *mut usize, layout.size())
+                    as *mut ObjString,
+            ))
+        }
+    }
+}
+
+impl Hashable for BoxedObjString {
+    #[inline(always)]
+    fn hash(&self) -> u32 {
+        self.0.inner.hash
+    }
+}
+
+impl PartialEq for BoxedObjString {
+    fn eq(&self, other: &Self) -> bool {
+        unsafe {
+            self.0.inner.length == other.0.inner.length
+                && std::slice::from_raw_parts(self.0.data.as_ptr(), self.0.inner.length).eq(
+                    std::slice::from_raw_parts(other.0.data.as_ptr(), other.0.inner.length),
+                )
+        }
+    }
+}
+
 impl fmt::Display for HeapValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            HeapValue::String(s) => write!(f, "{}", s.value),
+            HeapValue::String(s) => {
+                write!(f, "{}", s.as_str())
+            }
         }
     }
 }

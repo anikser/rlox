@@ -95,7 +95,7 @@ impl Chunk {
         }
         self.constants.push(constant);
 
-        return ConstantIdx((self.constants.len() - 1) as u32);
+        ConstantIdx((self.constants.len() - 1) as u32)
     }
 
     pub fn add_code_op(&mut self, code: OpCode, line: u32) {
@@ -169,7 +169,7 @@ impl Chunk {
             }
             _ => (),
         }
-        write!(f, "\n")?;
+        writeln!(f)?;
         Ok(i + 1)
     }
 }

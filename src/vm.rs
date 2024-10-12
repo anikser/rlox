@@ -36,7 +36,8 @@ type BinaryOp<I, O> = fn(I, I) -> O;
 
 impl VM {
     pub fn init() -> Self {
-        let vm = VM {
+        
+        VM {
             chunk: Rc::new(RefCell::new(Chunk::new())),
             ip: std::ptr::null_mut(),
             stack: std::array::from_fn(|_| Value::Nil),
@@ -44,8 +45,7 @@ impl VM {
             stack_idx: 0,
             objects: None,
             strings: Table::new(),
-        };
-        vm
+        }
     }
     pub fn repl(&mut self) {
         let stdin = io::stdin();
@@ -57,7 +57,7 @@ impl VM {
             // let result = { stdin.read_line(&mut buffer) };
             match iterator.next() {
                 // Ok(bytes_read) if bytes_read == 0 => {
-                Some(Ok(line)) if line.len() == 0 => {
+                Some(Ok(line)) if line.is_empty() => {
                     println!();
                     break;
                 }
@@ -184,14 +184,14 @@ impl VM {
     fn read_byte(&mut self) -> u8 {
         let ret = unsafe { *self.ip };
         self.ip = unsafe { self.ip.add(1) };
-        return ret;
+        ret
     }
 
     #[inline(always)]
     fn read_constant(&mut self) -> Value {
         let idx = self.read_byte();
         let val = self.chunk.borrow().constants[idx as usize].clone();
-        return val;
+        val
     }
 
     #[inline(always)]
@@ -242,7 +242,10 @@ impl VM {
         let a = self.pop();
         let b = self.pop();
         match (a, b) {
-            (Value::Double(right), Value::Double(left)) => Ok(self.push(f(left, right))),
+            (Value::Double(right), Value::Double(left)) => {
+                self.push(f(left, right));
+                Ok(())
+            },
             _ => panic!("Found unexpected non-Double value after validation."),
         }
     }

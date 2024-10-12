@@ -66,7 +66,7 @@ pub struct Obj {
 impl PartialEq for Obj {
     fn eq(&self, other: &Obj) -> bool {
         match (&self.value, &other.value) {
-            (HeapValue::String(a), HeapValue::String(b)) => a.eq(&b),
+            (HeapValue::String(a), HeapValue::String(b)) => a.eq(b),
         }
     }
 }
@@ -115,7 +115,7 @@ impl ObjString {
             hash ^= *x as u32;
             (hash, _) = hash.overflowing_mul(16777619);
         }
-        return hash;
+        hash
     }
 }
 

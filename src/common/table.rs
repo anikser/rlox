@@ -43,8 +43,8 @@ where
             self.grow_capacity(self.capacity * Self::GROW_FACTOR);
         }
 
-        let index = Self::find_entry_idx(&self.entries, self.capacity, &key);
-        let is_new = matches!(self.entries[index], None);
+        let index = Self::find_entry_idx(&self.entries, self.capacity, key);
+        let is_new = self.entries[index].is_none();
         let is_tombstone = matches!(self.entries[index], Some(_Entry::Tombstone));
         self.entries[index] = Some(_Entry::Some(Entry {
             key: key.clone(),
@@ -92,7 +92,7 @@ where
                         None => index,
                     }
                 }
-                Some(_Entry::Some(entry)) if (&entry.key).eq(key) => return index,
+                Some(_Entry::Some(entry)) if entry.key.eq(key) => return index,
                 Some(_Entry::Tombstone) => tombstone_idx = Some(index),
                 _ => (),
             }
@@ -109,12 +109,9 @@ where
 
         for i in 0..self.capacity {
             if let Some(entry) = self.entries[i].take() {
-                match entry {
-                    _Entry::Some(entry) => {
-                        let idx = Self::find_entry_idx(&entries, capacity, &entry.key);
-                        entries[idx] = Some(_Entry::Some(entry));
-                    }
-                    _ => (),
+                if let _Entry::Some(entry) = entry {
+                    let idx = Self::find_entry_idx(&entries, capacity, &entry.key);
+                    entries[idx] = Some(_Entry::Some(entry));
                 }
             }
         }

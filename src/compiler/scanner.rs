@@ -94,7 +94,7 @@ impl From<&str> for TokenType {
 impl Scanner {
     pub fn init(source: String) -> Self {
         Self {
-            source: source,
+            source,
             current: 0,
             start: 0,
             line: 1,
@@ -123,7 +123,7 @@ impl Scanner {
         self.start = self.current;
         match self.current == self.source.len() {
             true => self.make_token(TokenType::EOF),
-            false => match self.advance() as char {
+            false => match self.advance() {
                 '(' => self.make_token(TokenType::LeftParen),
                 ')' => self.make_token(TokenType::RightParen),
                 '{' => self.make_token(TokenType::LeftBrace),
@@ -199,7 +199,7 @@ impl Scanner {
     }
 
     fn is_at_end(&self) -> bool {
-        return self.current >= self.source.len();
+        self.current >= self.source.len()
     }
 
     fn peek_match(&mut self, c: char) -> bool {
@@ -213,7 +213,7 @@ impl Scanner {
 
     fn make_token(&self, token_type: TokenType) -> Token {
         Token {
-            token_type: token_type,
+            token_type,
             source: self.source[self.start..self.current].to_string(),
             line: self.line,
         }
@@ -293,7 +293,7 @@ impl Scanner {
             self.advance();
         }
 
-        let text = std::str::from_utf8(&self.source.as_bytes()[self.start..self.current]).unwrap();
+        let text = &self.source[self.start..self.current];
         self.make_token(TokenType::from(text))
     }
 }

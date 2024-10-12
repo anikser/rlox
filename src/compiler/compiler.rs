@@ -64,7 +64,7 @@ impl Parser {
     pub fn init(scanner: Scanner, chunk: Rc<RefCell<Chunk>>) -> Self {
         Self {
             scanner: Rc::new(RefCell::new(scanner)),
-            chunk: chunk,
+            chunk,
             current: Token {
                 token_type: TokenType::EOF,
                 source: "".to_owned(),

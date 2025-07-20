@@ -1,6 +1,6 @@
 use crate::{
     common::Chunk,
-    common::{BoxedObjString, HeapValue, Obj, OpCode, Value},
+    common::{ObjectRef, OpCode, Value, ObjectHeap},
     compiler::scanner::Scanner,
     vm::InterpretError,
 };
@@ -9,10 +9,11 @@ use std::{rc::Rc, str::FromStr};
 
 use super::{Token, TokenType};
 
-struct Parser {
+struct Parser<'a> {
     // FIXME: can we avoid doing this?
     scanner: Rc<RefCell<Scanner>>,
     chunk: Rc<RefCell<Chunk>>,
+    heap: &'a ObjectHeap,
     current: Token,
     previous: Token,
     had_error: bool,
@@ -53,18 +54,19 @@ impl Precedence {
 }
 
 struct ParseRule {
-    pub prefix: Option<fn(&mut Parser)>,
-    pub infix: Option<fn(&mut Parser)>,
+    pub prefix: Option<fn(&mut Parser<'_>)>,
+    pub infix: Option<fn(&mut Parser<'_>)>,
     pub precedence: Precedence,
 }
 
 // impl<'a, '> ParseRule<'parser> {}
 
-impl Parser {
-    pub fn init(scanner: Scanner, chunk: Rc<RefCell<Chunk>>) -> Self {
+impl<'a> Parser<'a> {
+    pub fn init(scanner: Scanner, chunk: Rc<RefCell<Chunk>>, heap: &'a ObjectHeap) -> Self {
         Self {
             scanner: Rc::new(RefCell::new(scanner)),
             chunk,
+            heap,
             current: Token {
                 token_type: TokenType::EOF,
                 source: "".to_owned(),
@@ -223,10 +225,8 @@ impl Parser {
 
     fn string(&mut self) {
         let token = &self.previous;
-        self.emit_constant(Value::Object(Obj {
-            value: HeapValue::String(BoxedObjString::of_ref(&token.source)),
-            next: None,
-        }));
+        let string_ref = self.heap.alloc_string(&token.source);
+        self.emit_constant(Value::Object(string_ref));
     }
 
     fn emit_constant(&mut self, value: Value) {
@@ -482,9 +482,9 @@ impl Parser {
     }
 }
 
-pub fn compile(source: String, chunk: Rc<RefCell<Chunk>>) -> Result<(), InterpretError> {
+pub fn compile(source: String, chunk: Rc<RefCell<Chunk>>, heap: &ObjectHeap) -> Result<(), InterpretError> {
     let scanner = Scanner::init(source);
-    let mut parser = Parser::init(scanner, chunk.clone());
+    let mut parser = Parser::init(scanner, chunk.clone(), heap);
     parser.advance();
     parser.expression();
     parser.consume(TokenType::EOF, "Expect end of expression.");

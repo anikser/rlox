@@ -6,8 +6,8 @@ use std::{
 };
 
 use crate::common::Table;
-use crate::common::{BoxedObjString, Chunk, Obj, OpCode};
-use crate::common::{HeapValue, Value};
+use crate::common::{Chunk, ObjectRef, OpCode, ObjectHeap, ObjectData};
+use crate::common::Value;
 
 use crate::compiler::*;
 
@@ -26,8 +26,8 @@ pub struct VM {
     stack: [Value; STACK_MAX],
     // TODO: revisit this too.. is there a point?
     stack_idx: usize,
-    objects: Option<*const Obj>,
-    strings: Table<BoxedObjString, ()>,
+    heap: ObjectHeap,
+    strings: Table<ObjectRef, ()>,
 }
 
 const STACK_MAX: usize = 256;
@@ -43,7 +43,7 @@ impl VM {
             stack: std::array::from_fn(|_| Value::Nil),
             // stack_top: std::ptr::null_mut(),
             stack_idx: 0,
-            objects: None,
+            heap: ObjectHeap::new(),
             strings: Table::new(),
         }
     }
@@ -97,7 +97,7 @@ impl VM {
     }
 
     pub fn interpret(&mut self, program: String) -> Result<(), InterpretError> {
-        compile(program, self.chunk.clone())?;
+        compile(program, self.chunk.clone(), &self.heap)?;
         self.ip = &self.chunk.borrow_mut().code[0];
         self.run()
     }
@@ -109,6 +109,18 @@ impl VM {
     // }
 
     fn run(&mut self) -> Result<(), InterpretError> {
+        // Manage GC roots before starting execution
+        self.manage_stack_roots();
+        
+        let result = self.run_inner();
+        
+        // Clear roots after execution
+        self.clear_stack_roots();
+        
+        result
+    }
+    
+    fn run_inner(&mut self) -> Result<(), InterpretError> {
         loop {
             // FIXME: do not unwrap...
             #[cfg(debug_assertions)]
@@ -128,7 +140,17 @@ impl VM {
             let opcode = OpCode::from(self.read_byte());
             match opcode {
                 OpCode::Return => {
-                    println!("{}", self.pop());
+                    let val = self.pop();
+                    match val {
+                        Value::Object(obj_ref) => {
+                            if let Some(obj) = self.heap.get(obj_ref) {
+                                println!("{}", obj.data);
+                            } else {
+                                println!("[invalid object]");
+                            }
+                        }
+                        _ => println!("{}", val),
+                    }
                     return Ok(());
                 }
                 OpCode::Constant => {
@@ -143,21 +165,13 @@ impl VM {
                     let negated = -self.pop();
                     self.push(negated);
                 }
-                OpCode::Add => match (self.peek(0), self.peek(1)) {
-                    (
-                        Value::Object(Obj {
-                            value: HeapValue::String(_),
-                            next: _,
-                        }),
-                        Value::Object(Obj {
-                            value: HeapValue::String(_),
-                            next: _,
-                        }),
-                    ) => {
+                OpCode::Add => {
+                    if self.is_string(0) && self.is_string(1) {
                         self.string_concat()?;
+                    } else {
+                        self.binary_op(|a, b| Value::Double(a + b))?;
                     }
-                    (_, _) => self.binary_op(|a, b| Value::Double(a + b))?,
-                },
+                }
                 OpCode::Subtract => self.binary_op(|a, b| Value::Double(a - b))?,
                 OpCode::Multiply => self.binary_op(|a, b| Value::Double(a * b))?,
                 OpCode::Divide => self.binary_op(|a, b| Value::Double(a / b))?,
@@ -251,47 +265,36 @@ impl VM {
     }
 
     fn string_concat(&mut self) -> Result<(), InterpretError> {
-        if !matches!(
-            self.peek(0),
-            Value::Object(Obj {
-                value: HeapValue::String(_),
-                next: _,
-            })
-        ) || !matches!(
-            self.peek(1),
-            Value::Object(Obj {
-                value: HeapValue::String(_),
-                next: _,
-            })
-        ) {
+        if !self.is_string(0) || !self.is_string(1) {
             return Err(self.runtime_error("Operands must be strings."));
         }
         let a = self.pop();
         let b = self.pop();
         match (a, b) {
-            (
-                Value::Object(Obj {
-                    value: HeapValue::String(right),
-                    next: _,
-                }),
-                Value::Object(Obj {
-                    value: HeapValue::String(left),
-                    next: _,
-                }),
-            ) => {
-                let mut new_string = String::with_capacity(left.len() + right.len());
-                let left_str = left.as_str();
-                let right_str = right.as_str();
-                new_string.push_str(left_str);
-                new_string.push_str(right_str);
-
-                let res = BoxedObjString::of(new_string);
-
-                let obj = self.create_object(HeapValue::String(res));
-                self.push(Value::Object(obj));
+            (Value::Object(right_ref), Value::Object(left_ref)) => {
+                let left_str = self.heap.get_string(left_ref).unwrap();
+                let right_str = self.heap.get_string(right_ref).unwrap();
+                
+                let mut new_string = String::with_capacity(left_str.len() + right_str.len());
+                new_string.push_str(&left_str);
+                new_string.push_str(&right_str);
+                
+                let result_ref = self.heap.alloc_string(&new_string);
+                self.push(Value::Object(result_ref));
                 Ok(())
             }
-            _ => panic!("Found unexpected non-Double value after validation."),
+            _ => panic!("Found unexpected non-string value after validation."),
+        }
+    }
+    
+    fn is_string(&self, distance: usize) -> bool {
+        match self.peek(distance) {
+            Value::Object(obj_ref) => {
+                self.heap.get(*obj_ref).map_or(false, |obj| {
+                    matches!(obj.data, ObjectData::String(_))
+                })
+            }
+            _ => false,
         }
     }
 
@@ -299,7 +302,16 @@ impl VM {
     fn print_stack(&mut self) {
         print!("        ");
         for i in 0..self.stack_idx {
-            print!("[{}]", self.stack[i]);
+            match &self.stack[i] {
+                Value::Object(obj_ref) => {
+                    if let Some(obj) = self.heap.get(*obj_ref) {
+                        print!("[{}]", obj.data);
+                    } else {
+                        print!("[invalid object]");
+                    }
+                }
+                val => print!("[{}]", val),
+            }
         }
         println!();
     }
@@ -315,27 +327,27 @@ impl VM {
         InterpretError::RuntimeError
     }
 
-    fn create_object(&mut self, value: HeapValue) -> Obj {
-        let obj = Obj {
-            value,
-            next: self.objects.take(),
-        };
-        self.objects = Some(&obj);
-        obj
+    fn manage_stack_roots(&mut self) {
+        // Add all object refs on the stack as GC roots
+        for i in 0..self.stack_idx {
+            if let Value::Object(obj_ref) = &self.stack[i] {
+                self.heap.add_root(*obj_ref);
+            }
+        }
     }
-
-    fn free_objects(&mut self) {
-        let maybe_obj = self.objects;
-        while let Some(obj_ref) = maybe_obj {
-            unsafe {
-                let obj = obj_ref.as_ref();
-            };
+    
+    fn clear_stack_roots(&mut self) {
+        // Remove all object refs from GC roots
+        for i in 0..self.stack_idx {
+            if let Value::Object(obj_ref) = &self.stack[i] {
+                self.heap.remove_root(*obj_ref);
+            }
         }
     }
 }
 
 impl Drop for VM {
     fn drop(&mut self) {
-        self.free_objects();
+        // Heap will be dropped automatically
     }
 }
